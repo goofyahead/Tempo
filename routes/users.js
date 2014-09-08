@@ -15,7 +15,7 @@ var client = require('twilio')(accountSid, authToken);
 exports.register = function (req, res) {
 	console.log('registration called for: '.yellow + req.body.phone);
 
-	var phone = req.body.phone;
+	var phone = req.param('phone');
 	var session = crypto.randomBytes(3).toString('hex').toString().toUpperCase();
 
 	redisClient.setex('phone_' + phone, TTL, session, redis.print);
@@ -24,8 +24,12 @@ exports.register = function (req, res) {
 		from: "+14156914520",
 		to: req.body.phone,
 		body: "your pin is " + session
-	}, function(err, message) { 
-		console.log(message.sid); 
+	}, function(err, message) {
+		if (! err) {
+			console.log("message sent: ".green + message.sid); 
+		}else {
+			console.log(error);
+		}
 	});
 
 	res.send(200);

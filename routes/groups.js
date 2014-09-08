@@ -15,6 +15,7 @@ exports.create = function (req, res) {
 		var ttl = req.body.ttl;
 		var people = req.body.people;
 		var peopleArray = [];
+		var protected = req.body.protected || true;
 		var me = req.header('phone');
 
 		people.forEach(function (guy) {
@@ -31,13 +32,61 @@ exports.create = function (req, res) {
 			when : timestamp,
 			owner : me,
 			image : imageUrl,
-			people : peopleArray
+			people : peopleArray,
+			protected : protected
 		};
 
 		console.log('CREATING GROUP: '.green + incr + ' With data ' + JSON.stringify(group) + ' OWNER: ' + me);
 		redisClient.setex('groups_' + incr, DEFAULT_TTL, JSON.stringify(group), redis.print);
 		redisClient.sadd('my_groups_' + me, incr, redis.print);
 
+		res.send(200);
+	});
+}
+
+exports.deleteUsersFromGroup = function (req, res) {
+	var people = req.body.people;
+	var modifiedGroup = req.params.group;
+	var me = req.header('phone');
+
+	console.log('DELETING '.yellow + people);
+	redisClient.get('groups_' + modifiedGroup, function (err, item){
+		var groupObj = JSON.parse(item);
+
+		if (groupObj.owner != me) res.send (403, {message : 'only owners can delete users'});
+		var peopleArray = [];
+		groupObj.people.forEach(function (person) {
+			if (! _.contains(people, person.id)) peopleArray.push(person);
+		});
+		groupObj.people = peopleArray;
+		redisClient.set('groups_' + modifiedGroup, JSON.stringify(groupObj), redis.print);
+		res.send(200);
+	});
+}
+
+exports.addUsersToGroup = function (req, res) {
+	var people = req.body.people;
+	var modifiedGroup = req.params.group;
+	var me = req.header('phone');
+
+	console.log('ASK TO ADD '.yellow + people);
+
+	redisClient.get('groups_' + modifiedGroup, function (err, item){
+		var groupObj = JSON.parse(item);
+
+		if (groupObj.protected && groupObj.owner != me) res.send (403, {message : 'only owners can add users'});
+
+		groupObj.people.forEach(function (person) {
+			if (_.contains(people, person.id)) people.splice(people.indexOf(person.id), 1);
+		});
+
+		console.log('ADDING '.yellow + people);
+
+		people.forEach(function (person) {
+			groupObj.people.push({id : person, status : 'pending', eta : '?'});
+		});
+
+		redisClient.set('groups_' + modifiedGroup, JSON.stringify(groupObj), redis.print);
 		res.send(200);
 	});
 }
@@ -73,6 +122,9 @@ exports.update = function (req, res) {
             res.send(404, {message : 'dont mess up the ids'});
 		} else {
 			var group = JSON.parse(item);
+
+			if (group.protected && group.owner != me) res.send (403, {message : 'only owners can edit groups'});
+
 			console.log(JSON.stringify(group));
 			console.log(JSON.stringify(newGroupData));
 			if (newGroupData.name && newGroupData.id) {
@@ -113,6 +165,8 @@ exports.notifyGroup = function (req, res) {
 				// push notification to team members, update group on redis
 				redisClient.setex('groups_' + group, DEFAULT_TTL, JSON.stringify(groupObj), redis.print);
 			    notifications.notify(idsToNotify, {group: group, who: me, ttl : ttl});
+			} else {
+				res.send(403, {message : 'you need to belong to the group to notify it'});
 			}
 			res.send(200);
 		}
